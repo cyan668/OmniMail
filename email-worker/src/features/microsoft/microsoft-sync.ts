@@ -2,8 +2,9 @@ import { canonicalMailFlags, changedIndexFields, needsIndexTrim, rememberIndexTr
 import type { Env, MailQueueJob, MicrosoftSyncJob } from '../../app/types'
 import { ImapConnectionError } from '../../platform/imap/imap-errors'
 import { microsoftMailEnabled } from './microsoft-credentials'
-import type { MicrosoftImapClient } from './microsoft-imap'
-import { openMicrosoftClient } from './microsoft-session'
+import { MicrosoftGraphError } from './microsoft-graph'
+import { refreshMicrosoftGraphFolder } from './microsoft-graph-sync'
+import { openMicrosoftClient, type MicrosoftClient } from './microsoft-session'
 import {
   microsoftAccountForSync,
   MicrosoftStoreError,
@@ -22,11 +23,12 @@ const SYNC_INTERVAL_SECONDS = 5 * 60
 const LEASE_SECONDS = 6 * 60
 const SCHEDULE_BATCH = 50
 
-export type MicrosoftSyncResult = { status: 'synced' | 'skipped'; retryable: boolean }
+export type MicrosoftSyncResult = { status: 'synced' | 'skipped'; retryable: boolean; retryAfter?: number }
 
 export function microsoftSyncErrorCode(error: unknown, authMode?: MicrosoftAccount['authMode']): string {
   if (error instanceof MicrosoftTokenError) return error.code
   if (error instanceof MicrosoftStoreError) return error.code
+  if (error instanceof MicrosoftGraphError) return error.code
   if (error instanceof ImapConnectionError) {
     if (error.status === 400 || error.status === 401) {
       return authMode === 'password' ? 'basic_auth_rejected' : 'imap_access_rejected'
@@ -79,7 +81,7 @@ export function messageStatement(
   env: Env,
   accountId: string,
   folderPath: string,
-  uidValidity: number,
+  uidValidity: number | null,
   message: MicrosoftMessageMetadata,
   now: number,
 ): D1PreparedStatement {
@@ -88,9 +90,11 @@ export function messageStatement(
       id, account_id, folder_path, uid_validity, imap_uid,
       internet_message_id, sender_name, sender_address, recipients_json,
       cc_json, subject, preview, received_at, sent_at, size_bytes, flags_json,
-      is_read, is_starred, has_attachments, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(account_id, folder_path, uid_validity, imap_uid) DO UPDATE SET
+      is_read, is_starred, has_attachments, created_at, updated_at, graph_message_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT${message.graphMessageId
+    ? "(account_id, folder_path, graph_message_id) WHERE graph_message_id != ''"
+    : '(account_id, folder_path, uid_validity, imap_uid)'} DO UPDATE SET
       internet_message_id = excluded.internet_message_id,
       sender_name = excluded.sender_name,
       sender_address = excluded.sender_address,
@@ -129,6 +133,7 @@ export function messageStatement(
     Number(message.hasAttachments),
     now,
     now,
+    message.graphMessageId || '',
   )
 }
 
@@ -137,9 +142,12 @@ export async function refreshMicrosoftFolderWithClient(
   accountId: string,
   folderPath: string,
   limit: number,
-  client: MicrosoftImapClient,
+  client: MicrosoftClient,
   now = Math.floor(Date.now() / 1000),
-): Promise<{ uidValidity: number; indexed: number }> {
+): Promise<{ uidValidity: number | null; indexed: number }> {
+  if (client.protocol === 'graph') {
+    return refreshMicrosoftGraphFolder(env, accountId, folderPath, limit, client, now)
+  }
   const mailbox = await client.examineFolder(folderPath)
   const remoteUids = await client.searchAllUids()
   const existing = await localUids(env, accountId, folderPath, mailbox.uidValidity)
@@ -234,6 +242,7 @@ async function recordFailure(
   const permissionError = [
     'imap_scope_missing', 'imap_access_rejected', 'xoauth2_unavailable',
     'invalid_scope', 'unauthorized_client', 'consent_required',
+    'graph_scope_missing', 'graph_access_rejected', 'graph_auth_rejected',
   ].includes(code)
   await env.DB.prepare(
     `UPDATE microsoft_imap_accounts
@@ -244,7 +253,8 @@ async function recordFailure(
     credentialError ? 'credential_error' : permissionError ? 'permission_error' : 'error',
     code,
     now,
-    now + ((credentialError || permissionError) ? 24 * 60 * 60 : SYNC_INTERVAL_SECONDS),
+    now + ((credentialError || permissionError) ? 24 * 60 * 60
+      : Math.max(SYNC_INTERVAL_SECONDS, error instanceof MicrosoftGraphError ? error.retryAfter : 0)),
     now,
     accountId,
     leaseId,
@@ -262,7 +272,7 @@ export async function syncMicrosoftAccount(
     return { status: 'skipped', retryable: false }
   }
   let account: MicrosoftAccount | null = null
-  let client: MicrosoftImapClient | undefined
+  let client: MicrosoftClient | undefined
   try {
     account = await microsoftAccountForSync(env, accountId)
     if (!account) throw new MicrosoftStoreError(404, 'account_not_found', 'Microsoft 账号不存在。')
@@ -291,11 +301,13 @@ export async function syncMicrosoftAccount(
     const code = await recordFailure(env, accountId, leaseId, error, account?.authMode, now)
     return {
       status: 'skipped',
+      retryAfter: error instanceof MicrosoftGraphError ? error.retryAfter : undefined,
       retryable: ![
         'invalid_grant', 'invalid_client', 'credential_decryption_failed',
         'credential_key_unavailable', 'basic_auth_rejected', 'imap_scope_missing',
         'imap_access_rejected', 'xoauth2_unavailable', 'invalid_scope',
         'response_too_large', 'account_not_found',
+        'graph_scope_missing', 'graph_access_rejected', 'graph_auth_rejected',
       ].includes(code),
     }
   } finally {
@@ -310,7 +322,8 @@ export async function consumeMicrosoftSyncJob(
   if (message.body.kind !== 'microsoft-sync') return
   const result = await syncMicrosoftAccount(env, message.body.accountId)
   if (result.retryable && message.attempts < 3) {
-    message.retry({ delaySeconds: 30 * 2 ** Math.max(0, message.attempts - 1) })
+    message.retry({ delaySeconds: Math.min(43_200,
+      Math.max(result.retryAfter || 0, 30 * 2 ** Math.max(0, message.attempts - 1))) })
   } else {
     message.ack()
   }

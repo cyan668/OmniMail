@@ -272,6 +272,8 @@ export interface MicrosoftAccount {
   name: string
   email: string
   authMode: MicrosoftAuthMode
+  protocol?: 'imap' | 'graph'
+  canMarkRead?: boolean
   clientIdMasked: string
   authority: string
   status: MicrosoftAccountStatus
@@ -313,10 +315,10 @@ export interface MicrosoftFolder {
 
 export interface MicrosoftMessageSummary {
   id: string
-  account: Pick<MicrosoftAccount, 'id' | 'name' | 'email' | 'status'>
+  account: Pick<MicrosoftAccount, 'id' | 'name' | 'email' | 'status' | 'protocol'>
   folderPath: string
-  uidValidity: number
-  uid: number
+  uidValidity: number | null
+  uid: number | null
   senderName: string
   senderAddress: string
   recipients: string[]

@@ -36,7 +36,7 @@ const importPlaceholder = [
 function safeResultError(code?: string, message?: string) {
   if (message) return message
   if (code === 'duplicate') return t('账号已存在。')
-  return t('账号验证失败，请检查凭据、权限和 IMAP 设置。')
+  return t('账号验证失败，请检查凭据和邮箱授权。')
 }
 
 function importModeLabel(mode: MicrosoftImportMode | null) {

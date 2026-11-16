@@ -1,4 +1,5 @@
 export type MicrosoftAuthMode = 'oauth2' | 'password'
+export type MicrosoftProtocol = 'imap' | 'graph'
 export type MicrosoftAccountStatus =
   | 'pending_validation'
   | 'active'
@@ -14,6 +15,8 @@ export interface MicrosoftAccountRow {
   provided_email: string
   normalized_email: string
   auth_mode: MicrosoftAuthMode
+  protocol?: MicrosoftProtocol
+  can_mark_read?: number
   client_id: string
   authority: string
   refresh_token_cipher: string
@@ -48,6 +51,8 @@ export interface MicrosoftAccount extends MicrosoftAccountSecrets {
   providedEmail: string
   normalizedEmail: string
   authMode: MicrosoftAuthMode
+  protocol?: MicrosoftProtocol
+  canMarkRead?: boolean
   clientId: string
   authority: string
   accessTokenExpiresAt: number | null
@@ -70,6 +75,8 @@ export interface PublicMicrosoftAccount {
   name: string
   email: string
   authMode: MicrosoftAuthMode
+  protocol: MicrosoftProtocol
+  canMarkRead: boolean
   clientIdMasked: string
   authority: string
   status: MicrosoftAccountStatus
@@ -102,7 +109,8 @@ export interface MicrosoftFolder {
 }
 
 export interface MicrosoftMessageMetadata {
-  uid: number
+  uid: number | null
+  graphMessageId?: string
   internetMessageId: string
   senderName: string
   senderAddress: string

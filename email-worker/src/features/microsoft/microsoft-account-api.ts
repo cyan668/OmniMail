@@ -3,7 +3,7 @@ import { writeAudit } from '../../shared/audit/audit'
 import { sha256 } from '../auth/session/auth'
 import { microsoftMailEnabled } from './microsoft-credentials'
 import { microsoftImportAccount, MicrosoftInputError } from './microsoft-fields'
-import type { MicrosoftImapClient } from './microsoft-imap'
+import { MicrosoftGraphClient } from './microsoft-graph'
 import {
   maskedMicrosoftEmail,
   microsoftJsonBody,
@@ -11,7 +11,7 @@ import {
   microsoftPrivateJson,
   microsoftResponseError,
 } from './microsoft-api-shared'
-import { openMicrosoftClient } from './microsoft-session'
+import { openMicrosoftClient, type MicrosoftClient } from './microsoft-session'
 import {
   MicrosoftAccountStore,
   MicrosoftStoreError,
@@ -19,10 +19,11 @@ import {
   saveMicrosoftFolders,
 } from './microsoft-store'
 import { refreshMicrosoftFolders } from './microsoft-sync'
-import { refreshMicrosoftToken } from './microsoft-token'
+import { refreshMicrosoftImportToken } from './microsoft-token'
 import type {
   MicrosoftAccount,
   MicrosoftFolder,
+  MicrosoftProtocol,
   ValidMicrosoftImport,
 } from './microsoft-types'
 
@@ -35,7 +36,10 @@ async function microsoftClient(
   email: string,
   authMode: ValidMicrosoftImport['authMode'],
   credential: string,
-): Promise<MicrosoftImapClient> {
+  protocol: MicrosoftProtocol,
+  canMarkRead: boolean,
+): Promise<MicrosoftClient> {
+  if (protocol === 'graph') return new MicrosoftGraphClient(credential, canMarkRead)
   const { MicrosoftImapClient } = await import('./microsoft-imap')
   return new MicrosoftImapClient(email, authMode, credential)
 }
@@ -72,37 +76,48 @@ export async function claimMicrosoftValidationAttempt(
   }
 }
 
-async function validateImport(input: ValidMicrosoftImport): Promise<{
+async function validateImport(input: ValidMicrosoftImport, protocol?: MicrosoftProtocol): Promise<{
   refreshToken: string
   accessToken: string
   accessTokenExpiresAt: number | null
   folders: MicrosoftFolder[]
+  protocol: MicrosoftProtocol
+  canMarkRead: boolean
 }> {
   let refreshToken = input.refreshToken || ''
   let accessToken = ''
   let accessTokenExpiresAt: number | null = null
+  let selectedProtocol = protocol || 'imap'
+  let canMarkRead = true
   if (input.authMode === 'oauth2') {
-    const token = await refreshMicrosoftToken({
+    const token = await refreshMicrosoftImportToken({
       authority: input.authority,
       clientId: input.clientId,
       refreshToken,
+      protocol,
     })
     refreshToken = token.refreshToken
     accessToken = token.accessToken
     accessTokenExpiresAt = Math.floor(Date.now() / 1000) + token.expiresIn
+    selectedProtocol = token.protocol
+    canMarkRead = token.canMarkRead
   }
   const client = await microsoftClient(
     input.email,
     input.authMode,
     input.authMode === 'oauth2' ? accessToken : input.password || '',
+    selectedProtocol,
+    canMarkRead,
   )
   try {
     await client.open()
+    if (client.protocol === 'graph') await client.validateIdentity(input.email)
     const folders = await client.listFolders()
     const inbox = folders.find(({ path }) => path.toUpperCase() === 'INBOX')
     if (!inbox) throw new MicrosoftStoreError(502, 'inbox_unavailable', 'Microsoft INBOX 不可用。')
     await client.examineFolder(inbox.path)
-    return { refreshToken, accessToken, accessTokenExpiresAt, folders }
+    return { refreshToken, accessToken, accessTokenExpiresAt, folders,
+      protocol: selectedProtocol, canMarkRead }
   } finally {
     await client.close()
   }
@@ -175,6 +190,8 @@ export async function importMicrosoftAccounts(
           providedEmail: input.email,
           normalizedEmail: input.email,
           authMode: input.authMode,
+          protocol: validated.protocol,
+          canMarkRead: validated.canMarkRead,
           clientId: input.clientId,
           authority: input.authority,
           refreshToken: validated.refreshToken,
@@ -253,7 +270,7 @@ export async function updateMicrosoftCredential(
       authMode,
     })
     await claimMicrosoftValidationAttempt(env, user.id, ip)
-    const validated = await validateImport(input)
+    const validated = await validateImport(input, account.protocol || 'imap')
     const now = Math.floor(Date.now() / 1000)
     if (authMode === 'oauth2') {
       await store.replaceOAuthCredential({
@@ -263,6 +280,7 @@ export async function updateMicrosoftCredential(
         refreshToken: validated.refreshToken,
         accessToken: validated.accessToken,
         accessTokenExpiresAt: validated.accessTokenExpiresAt,
+        canMarkRead: validated.canMarkRead,
       }, now)
     } else {
       await store.replacePassword(accountId, input.password || '', now)
@@ -291,7 +309,8 @@ async function recordRemoteFailure(
   const status = [
     'invalid_grant', 'invalid_client', 'basic_auth_rejected',
   ].includes(code) ? 'credential_error'
-    : ['imap_scope_missing', 'imap_access_rejected', 'xoauth2_unavailable'].includes(code)
+    : ['imap_scope_missing', 'imap_access_rejected', 'xoauth2_unavailable',
+      'graph_scope_missing', 'graph_access_rejected', 'graph_auth_rejected'].includes(code)
       ? 'permission_error' : 'error'
   const now = Math.floor(Date.now() / 1000)
   try {
@@ -309,7 +328,7 @@ export async function verifyMicrosoftAccount(
   ip: string,
 ): Promise<Response> {
   let account: MicrosoftAccount | undefined
-  let client: MicrosoftImapClient | undefined
+  let client: MicrosoftClient | undefined
   try {
     account = await new MicrosoftAccountStore(env, user.id).get(accountId)
     await claimMicrosoftValidationAttempt(env, user.id, ip)

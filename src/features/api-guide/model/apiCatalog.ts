@@ -32,7 +32,7 @@ export const apiGroups: Array<{
   { id: 'gmail', title: localized('Gmail 聚合收件箱', 'Gmail unified inbox'),
     description: localized('多账号凭据、受控 IMAP 同步、聚合索引、正文与附件。', 'Multi-account credentials, controlled IMAP synchronization, unified indexing, message bodies, and attachments.') },
   { id: 'microsoft', title: localized('Microsoft 邮箱', 'Microsoft Mail'),
-    description: localized('OAuth2 认证、受控 IMAP 同步、正文、附件与精确已读写入。', 'OAuth2 authentication, controlled IMAP synchronization, bodies, attachments, and exact Seen writes.') },
+    description: localized('OAuth2 认证、IMAP 或 Graph 收信、正文、附件与精确已读写入。', 'OAuth2 authentication, IMAP or Graph mail retrieval, bodies, attachments, and exact read-state writes.') },
   { id: 'qqMail', title: localized('QQ 邮箱', 'QQ Mail'),
     description: localized('授权码认证、有限 INBOX 索引、按需正文、精确已读与受控 SMTP 发信。', 'Authorization-code authentication, bounded INBOX indexing, on-demand bodies, exact Seen writes, and controlled SMTP sending.') },
   { id: 'naverMail', title: localized('NAVER 邮箱', 'NAVER Mail'),

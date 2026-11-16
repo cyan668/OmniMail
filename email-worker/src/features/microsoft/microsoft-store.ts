@@ -29,6 +29,8 @@ export function publicMicrosoftAccount(account: MicrosoftAccount): PublicMicroso
     name: account.name,
     email: account.normalizedEmail,
     authMode: account.authMode,
+    protocol: account.protocol || 'imap',
+    canMarkRead: account.canMarkRead !== false,
     clientIdMasked: maskedClientId(account.clientId),
     authority: account.authority,
     status: account.status,
@@ -47,6 +49,8 @@ function publicRow(row: MicrosoftAccountRow): PublicMicrosoftAccount {
     name: row.name,
     email: row.normalized_email,
     authMode: row.auth_mode,
+    protocol: row.protocol || 'imap',
+    canMarkRead: row.can_mark_read !== 0,
     clientIdMasked: maskedClientId(row.client_id),
     authority: row.authority,
     status: row.status,
@@ -94,6 +98,8 @@ async function accountFromRow(env: Env, row: MicrosoftAccountRow): Promise<Micro
     providedEmail: row.provided_email,
     normalizedEmail: row.normalized_email,
     authMode: row.auth_mode,
+    protocol: row.protocol || 'imap',
+    canMarkRead: row.can_mark_read !== 0,
     clientId: row.client_id,
     authority: row.authority,
     refreshToken,
@@ -199,8 +205,8 @@ export class MicrosoftAccountStore {
           status, last_synced_at,
           next_sync_at, last_error_code, last_error_at, sync_lease_id,
           sync_lease_until, token_lease_id, token_lease_until,
-          last_manual_sync_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          last_manual_sync_at, created_at, updated_at, protocol, can_mark_read
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         account.id,
         this.userId,
@@ -227,6 +233,8 @@ export class MicrosoftAccountStore {
         account.lastManualSyncAt,
         account.createdAt,
         account.updatedAt,
+        account.protocol || 'imap',
+        Number(account.canMarkRead !== false),
       ).run()
     } catch (error) {
       if (/UNIQUE|constraint/i.test(error instanceof Error ? error.message : '')) {
@@ -262,7 +270,7 @@ export class MicrosoftAccountStore {
     const result = await this.env.DB.prepare(
       `UPDATE microsoft_imap_accounts
           SET client_id = ?, authority = ?, refresh_token_cipher = ?,
-              access_token_cipher = ?, access_token_expires_at = ?,
+              access_token_cipher = ?, access_token_expires_at = ?, can_mark_read = ?,
               status = 'active', last_error_code = '', last_error_at = NULL,
               next_sync_at = 0, token_lease_id = NULL, token_lease_until = NULL,
               sync_lease_id = NULL, sync_lease_until = NULL, updated_at = ?
@@ -273,6 +281,7 @@ export class MicrosoftAccountStore {
       refreshCipher,
       accessCipher,
       account.accessTokenExpiresAt,
+      Number(account.canMarkRead !== false),
       now,
       account.id,
       this.userId,

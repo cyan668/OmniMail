@@ -51,6 +51,7 @@ export async function microsoftAccessToken(
       clientId: account.clientId,
       refreshToken: account.refreshToken,
       fetcher: options.fetcher,
+      protocol: account.protocol || 'imap',
     })
     const refreshCipher = await encryptMicrosoftCredential(
       env,
@@ -67,15 +68,16 @@ export async function microsoftAccessToken(
       `UPDATE microsoft_imap_accounts
           SET refresh_token_cipher = ?, access_token_cipher = ?,
               access_token_expires_at = ?, token_lease_id = NULL,
-              token_lease_until = NULL, updated_at = ?
+              token_lease_until = NULL, can_mark_read = ?, updated_at = ?
         WHERE id = ? AND token_lease_id = ?`,
-    ).bind(refreshCipher, accessCipher, expiresAt, now, account.id, leaseId).run()
+    ).bind(refreshCipher, accessCipher, expiresAt, Number(result.canMarkRead), now, account.id, leaseId).run()
     if (!saved.meta.changes) {
       throw new MicrosoftStoreError(409, 'token_refresh_lost', 'Microsoft token 刷新租约已失效。')
     }
     account.refreshToken = result.refreshToken
     account.accessToken = result.accessToken
     account.accessTokenExpiresAt = expiresAt
+    account.canMarkRead = result.canMarkRead
     return result.accessToken
   } catch (error) {
     try {

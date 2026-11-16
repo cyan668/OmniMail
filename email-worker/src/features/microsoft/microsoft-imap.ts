@@ -27,6 +27,7 @@ function validUids(values: number[]): number[] {
 }
 
 export class MicrosoftImapClient {
+  readonly protocol = 'imap' as const
   private readonly connection = new ImapConnection(
     IMAP_HOST,
     IMAP_PORT,

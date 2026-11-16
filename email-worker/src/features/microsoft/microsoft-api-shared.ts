@@ -2,6 +2,7 @@ import { ImapConnectionError } from '../../platform/imap/imap-errors'
 import { MicrosoftInputError } from './microsoft-fields'
 import { MicrosoftStoreError } from './microsoft-store'
 import { MicrosoftTokenError } from './microsoft-token'
+import { MicrosoftGraphError } from './microsoft-graph'
 import { microsoftSyncErrorCode } from './microsoft-sync'
 import type { MicrosoftAuthMode } from './microsoft-types'
 
@@ -25,6 +26,12 @@ const messages: Record<string, string> = {
   connection_failed: '暂时无法连接 Microsoft 邮箱，请稍后重试。',
   token_endpoint_unavailable: 'Microsoft token 服务暂时不可用，请稍后重试。',
   token_refresh_busy: 'Microsoft token 正在刷新，请稍后重试。',
+  graph_scope_missing: 'Microsoft 授权缺少 Mail.Read 或 Mail.ReadWrite 收信权限。',
+  graph_access_rejected: 'Microsoft 拒绝 Graph 邮箱访问，请检查应用授权或账号策略。',
+  graph_auth_rejected: 'Microsoft Graph 授权无法使用，请更新 OAuth2 凭据。',
+  graph_throttled: 'Microsoft 请求过于频繁，请稍后再试。',
+  graph_unavailable: 'Microsoft Graph 暂时不可用，请稍后重试。',
+  graph_identity_mismatch: 'Microsoft 授权对应的邮箱与填写地址不一致，请使用该授权的主邮箱地址。',
 }
 
 export function microsoftResponseError(
@@ -37,7 +44,7 @@ export function microsoftResponseError(
   if (error instanceof MicrosoftStoreError) {
     return microsoftPrivateJson({ error: error.message, code: error.code }, error.status)
   }
-  if (error instanceof MicrosoftTokenError) {
+  if (error instanceof MicrosoftTokenError || error instanceof MicrosoftGraphError) {
     return microsoftPrivateJson({
       error: messages[error.code] || 'Microsoft token 刷新失败。',
       code: error.code,

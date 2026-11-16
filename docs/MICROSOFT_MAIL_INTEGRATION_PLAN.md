@@ -9,9 +9,9 @@
 ## 1. 当前结论
 
 OmniMail 已提供独立的 Microsoft 邮箱工作区，支持用户连接多个 Outlook.com、Hotmail、Live，
-以及租户允许 IMAP 的 Microsoft 365 委托式邮箱。当前实现只覆盖 Azure Global。
+以及租户允许委托邮箱访问的 Microsoft 365 委托式邮箱。当前实现只覆盖 Azure Global。
 
-认证路径只有一条：
+OAuth2 认证支持两条收信路径，连接成功后保存 protocol：
 
 ```text
 refresh token + Client ID
@@ -19,14 +19,18 @@ refresh token + Client ID
   -> access token
   -> outlook.office365.com:993 TLS
   -> IMAP SASL XOAUTH2
+
+refresh token + Client ID
+  -> Microsoft OAuth v2 token endpoint (Graph .default)
+  -> graph.microsoft.com/v1.0/me/
+  -> folders / message metadata / MIME
 ```
 
 仅邮箱密码导入、IMAP `LOGIN`、ROPC、网页登录自动化和 OAuth2 失败后的密码回退均已停用。
 四字段组合中携带的 password 只可在用户明确确认后独立加密留存，不参与任何登录、验证、同步
 或失败回退。
 
-运行时不依赖第三方 Outlook 收件服务，不向第三方发送邮箱、令牌、密码或邮件内容。Microsoft
-Graph 也不是当前实现的一部分。
+运行时直接连接 Microsoft 官方服务。Graph 复用现有凭据加密、账号租约、Queue 同步和 MIME 解析。
 
 ## 2. 已实现的产品能力
 
@@ -34,7 +38,7 @@ Graph 也不是当前实现的一部分。
 
 - 分字段录入：账号名称、邮箱地址、refresh token、Client ID、authority 和可选组合密码。
 - 批量导入：浏览器解析逐行文本，先安全预览，再逐账号验证并导入。
-- 新账号保存前必须真实完成 token 兑换、IMAP XOAUTH2、`LIST` 和 INBOX `EXAMINE`。
+- 新账号先尝试 IMAP scope；授权范围不匹配时验证 Graph。IMAP 必须通过 XOAUTH2、LIST 和 EXAMINE；Graph 必须通过身份核对、INBOX 访问和文件夹列表。
 - 重复邮箱不会覆盖已有账号；每一项独立返回成功、重复或稳定错误。
 - 组合密码存在时，安全预览页必须勾选允许服务端加密保存，之后才会上传。
 
@@ -42,7 +46,7 @@ Graph 也不是当前实现的一部分。
 
 - 查看邮箱、脱敏 Client ID、连接状态和最近错误码；替换凭据表单会带入当前 authority。
 - 修改本地备注名称。
-- 重新验证当前凭据与 IMAP 权限。
+- 按账号保存的连接方式验证当前凭据与邮箱权限。
 - 手动把当前账号 INBOX 同步加入 Queue。
 - 真实验证成功后替换 refresh token、Client ID 和 authority。
 - 单个断开，或进入批量管理后选择多个账号顺序断开。
@@ -51,7 +55,7 @@ Graph 也不是当前实现的一部分。
 ### 工作区
 
 - “全部 Microsoft”聚合所有已连接账号的 INBOX 元数据。
-- 选择单个账号后，可浏览 Microsoft `LIST` 返回的文件夹。
+- 选择单个账号后，可浏览 Microsoft IMAP 或 Graph 返回的文件夹。
 - 每页数量支持 25、50、100、200，服务端接受范围为 1–200，默认 50。
 - 搜索发件人、收件人、抄送和主题；使用不透明游标分页。
 - 顶部复制按钮在单账号范围复制当前邮箱，在全部范围复制账号列表中的第一个邮箱。
@@ -63,8 +67,9 @@ Graph 也不是当前实现的一部分。
 ### 邮件读取
 
 - 列表长期保存的只是有限元数据，不保存正文或附件内容。
-- 打开邮件时用 `BODY.PEEK[]` 按需获取完整 MIME，并解析纯文本、HTML、CID 图片和附件。
-- 正文成功读取后，如果本地记录仍为未读，使用独立 IMAP 会话精确执行：
+- 打开邮件时通过 IMAP `BODY.PEEK[]` 或 Graph MIME `$value` 获取原文，复用解析器读取纯文本、HTML、CID 图片和附件。
+- 正文成功读取后，Graph 在有 Mail.ReadWrite 时仅 PATCH `isRead:true`；仅有 Mail.Read 时保持只读。
+- IMAP 如果本地记录仍为未读，使用独立会话精确执行：
 
   ```imap
   SELECT <validated-folder>
@@ -137,7 +142,7 @@ email----password
 
 `password` 不存在时不要发送 `persistPasswordConfirmed`。存在时该字段必须严格为 `true`。
 
-## 4. OAuth 与 IMAP 网络边界
+## 4. OAuth 与邮箱网络边界
 
 允许的 OAuth endpoint 只有：
 
@@ -152,12 +157,14 @@ https://login.microsoftonline.com/{authority}/oauth2/v2.0/token
 - `organizations`
 - 合法 tenant UUID
 
-token 请求固定使用：
+IMAP token 请求固定使用：
 
 ```text
 grant_type=refresh_token
 scope=https://outlook.office.com/IMAP.AccessAsUser.All offline_access
 ```
+
+Graph 刷新 scope 固定为 `https://graph.microsoft.com/.default offline_access`，要求已同意 Mail.Read/Mail.ReadWrite；身份核对需要 User.Read。已保存账号刷新或更换凭据时保持原协议。
 
 IMAP 主机和端口固定为 `outlook.office365.com:993`，强制 TLS。导入数据和 API 请求都不能指定
 OAuth URL、IMAP 主机、端口、TLS 策略、代理或原始 IMAP 命令。
@@ -174,6 +181,7 @@ OAuth URL、IMAP 主机、端口、TLS 策略、代理或原始 IMAP 命令。
 - Queue 消费者使用 6 分钟账号同步 lease，避免同一账号并发同步。
 - 首次/常规后台同步读取最近 100 条目标元数据。
 - 每个账号、每个文件夹本地最多保留最近 500 条元数据。
+- Graph 按最新接收时间分页读取有界窗口，成功读取全部所需页面后才更新索引并移除窗口外的本地元数据；不会删除 Microsoft 远端邮件。
 - Queue 临时失败最多有限重试；凭据、权限、响应过大等不可重试错误直接确认任务。
 
 ### 手动同步
@@ -195,6 +203,7 @@ OAuth URL、IMAP 主机、端口、TLS 策略、代理或原始 IMAP 命令。
 
 - `0027_microsoft_imap.sql`
 - `0028_microsoft_oauth_combination_password.sql`
+- `0042_microsoft_graph.sql`
 
 当前表：
 
@@ -208,6 +217,8 @@ OAuth URL、IMAP 主机、端口、TLS 策略、代理或原始 IMAP 命令。
 ```text
 account_id + folder_path + uid_validity + imap_uid
 ```
+
+Graph 消息使用独立的 graph_message_id（immutable ID），不伪造 IMAP UID。INBOX 路径保持不变，其余文件夹路径为 graph: 加服务器 ID。迁移保留原索引、外键和通知触发器。
 
 UID 不能脱离文件夹和 UIDVALIDITY 单独使用。UIDVALIDITY 改变时会删除该文件夹旧索引，再进行
 有限重建。远端已删除 UID 会从本地索引移除。
@@ -245,9 +256,9 @@ refresh token、短期 access token、组合 password 和密文都不会通过�
 | `PATCH` | `/api/microsoft/accounts/{id}` | 修改本地备注名称 |
 | `PUT` | `/api/microsoft/accounts/{id}/credential` | 验证成功后替换 OAuth2 凭据 |
 | `DELETE` | `/api/microsoft/accounts/{id}` | 删除本地凭据、文件夹和索引 |
-| `POST` | `/api/microsoft/accounts/{id}/verify` | 重新验证 token、IMAP 和文件夹 |
+| `POST` | `/api/microsoft/accounts/{id}/verify` | 按保存的 IMAP/Graph 协议重新验证 token、邮箱和文件夹 |
 | `POST` | `/api/microsoft/accounts/{id}/sync` | 受限加入该账号 INBOX 同步 |
-| `GET` | `/api/microsoft/accounts/{id}/folders` | 读取缓存文件夹，可用 `refresh=1` 重新 LIST |
+| `GET` | `/api/microsoft/accounts/{id}/folders` | 读取缓存文件夹，可用 `refresh=1` 从 Microsoft 刷新 |
 | `GET` | `/api/microsoft/messages` | 聚合 INBOX 或读取单账号文件夹元数据 |
 | `GET` | `/api/microsoft/accounts/{accountId}/messages/{messageId}` | 按需读取 MIME 并尝试同步已读 |
 | `GET` | `/api/microsoft/accounts/{accountId}/messages/{messageId}/attachments/{partId}` | 按需下载附件 |
@@ -264,7 +275,7 @@ account ID 和 message ID；不存在或不属于当前用户时返回相同的�
 - 手动账号同步冷却 60 秒；当前文件夹远程刷新冷却 30 秒。
 - 账号名称最长 60 字符；refresh token 最长 16,384 字符；组合密码最长 1,024 字符。
 - 查询关键词在服务端截断到 120 字符。
-- 文件夹只能来自该账号已缓存的 `LIST` 结果，不能由任意用户字符串直接选中。
+- 文件夹只能来自该账号已缓存的 IMAP/Graph 结果，不能由任意用户字符串直接选中。
 - IMAP metadata 每批最多抓取 20 个 UID，并受协议响应和总执行时间限制。
 - HTML 使用现有沙箱与 CSP 渲染，下载响应使用安全文件名、`nosniff` 和 `private, no-store`。
 
@@ -305,6 +316,8 @@ email-worker/src/features/microsoft/microsoft-token.ts
 email-worker/src/features/microsoft/microsoft-token-manager.ts
 email-worker/src/features/microsoft/microsoft-session.ts
 email-worker/src/features/microsoft/microsoft-imap.ts
+email-worker/src/features/microsoft/microsoft-graph.ts
+email-worker/src/features/microsoft/microsoft-graph-sync.ts
 email-worker/src/features/microsoft/microsoft-sync.ts
 email-worker/src/features/microsoft/microsoft-store.ts
 email-worker/src/features/microsoft/microsoft-credentials.ts
@@ -322,6 +335,7 @@ email-worker/src/features/microsoft/microsoft-credentials.ts
 - OAuth2-only 输入校验和两种批量顺序；
 - XOAUTH2、LIST、EXAMINE、UID SEARCH/FETCH、MIME、附件和 `\Seen`；
 - D1 用户隔离、唯一约束、同步 lease、UID 对账和状态转换；
+- Graph 授权协商、刷新、不可变 ID、分页 URL 边界、MIME/附件、只读权限、通知和旧数据迁移；
 - 连接、替换、验证、同步、断开和跨用户 API 边界；
 - 批量导入两步流、逐项动画、批量断开、范围复制、全部账号同步和移动端布局 E2E。
 
@@ -338,7 +352,7 @@ npm run build
 
 ## 12. 当前明确不做
 
-- Microsoft Graph、Webhook 或 Graph `Mail.Read` token 通道。
+- Microsoft Graph Webhook 和邮件发送。
 - 自动获取 refresh token、硬编码第三方 Client ID 或借用 Microsoft 第一方应用。
 - ROPC、MFA/条件访问绕过、代理池或网页登录自动化。
 - 仅邮箱密码、IMAP LOGIN 或 OAuth2 失败后的密码回退。

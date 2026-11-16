@@ -10,6 +10,7 @@ import { openMicrosoftClient } from './microsoft-session'
 import { MicrosoftAccountStore, MicrosoftStoreError } from './microsoft-store'
 import { refreshMicrosoftFolderWithClient } from './microsoft-sync'
 import type { MicrosoftAccountStatus } from './microsoft-types'
+import type { MicrosoftProtocol } from './microsoft-types'
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 const FOLDER_REFRESH_INTERVAL_SECONDS = 30
@@ -18,8 +19,10 @@ type MicrosoftMessageRow = {
   id: string
   account_id: string
   folder_path: string
-  uid_validity: number
-  imap_uid: number
+  uid_validity: number | null
+  imap_uid: number | null
+  graph_message_id: string
+  account_protocol: MicrosoftProtocol
   internet_message_id: string
   sender_name: string
   sender_address: string
@@ -68,6 +71,7 @@ function publicMessage(row: MicrosoftMessageRow) {
       name: row.account_name,
       email: row.account_email,
       status: row.account_status,
+      protocol: row.account_protocol || 'imap',
     },
     folderPath: row.folder_path,
     uidValidity: row.uid_validity,
@@ -184,7 +188,7 @@ export async function listMicrosoftMessages(
     }
     const { results } = await env.DB.prepare(
       `SELECT m.*, a.name AS account_name, a.normalized_email AS account_email,
-              a.status AS account_status
+              a.status AS account_status, a.protocol AS account_protocol
          FROM microsoft_imap_messages m
          JOIN microsoft_imap_accounts a ON a.id = m.account_id
         WHERE ${conditions.join(' AND ')}
@@ -215,7 +219,7 @@ async function ownedMessage(
 ): Promise<MicrosoftMessageRow> {
   const row = await env.DB.prepare(
     `SELECT m.*, a.name AS account_name, a.normalized_email AS account_email,
-            a.status AS account_status
+            a.status AS account_status, a.protocol AS account_protocol
        FROM microsoft_imap_accounts a
        JOIN microsoft_imap_messages m ON m.account_id = a.id
       WHERE a.user_id = ? AND a.id = ? AND m.id = ? LIMIT 1`,
@@ -240,29 +244,37 @@ async function remoteMessage(
   const client = await openMicrosoftClient(env, account)
   try {
     const mailbox = await client.examineFolder(row.folder_path)
-    if (mailbox.uidValidity !== row.uid_validity) {
+    if (client.protocol !== 'graph' && mailbox.uidValidity !== row.uid_validity) {
       throw new MicrosoftStoreError(
         404,
         'message_identity_changed',
         'Microsoft 文件夹 UIDVALIDITY 已变化，请刷新邮件列表。',
       )
     }
-    const parsed = await client.getMessage(row.folder_path, row.imap_uid)
+    if (client.protocol === 'graph' ? !row.graph_message_id : !row.imap_uid || !row.uid_validity) {
+      throw new MicrosoftStoreError(404, 'message_identity_changed', 'Microsoft 邮件身份已变化，请刷新邮件列表。')
+    }
+    const parsed = client.protocol === 'graph'
+      ? await client.getMessage(row.folder_path, row.graph_message_id)
+      : await client.getMessage(row.folder_path, row.imap_uid!)
     let markedRead = false
-    if (markRead && !row.is_read) {
+    if (markRead && !row.is_read && account.canMarkRead !== false) {
       try {
-        await client.markSeen(row.folder_path, row.imap_uid, row.uid_validity)
+        if (client.protocol === 'graph') await client.markSeen(row.folder_path, row.graph_message_id)
+        else await client.markSeen(row.folder_path, row.imap_uid!, row.uid_validity!)
         markedRead = true
         try {
           await env.DB.prepare(
             `UPDATE microsoft_imap_messages SET is_read = 1, updated_at = ?
               WHERE id = ? AND account_id = ? AND folder_path = ?
-                AND uid_validity = ? AND imap_uid = ?`,
+                AND ((graph_message_id != '' AND graph_message_id = ?)
+                  OR (graph_message_id = '' AND uid_validity = ? AND imap_uid = ?))`,
           ).bind(
             Math.floor(Date.now() / 1000),
             row.id,
             accountId,
             row.folder_path,
+            row.graph_message_id || '',
             row.uid_validity,
             row.imap_uid,
           ).run()

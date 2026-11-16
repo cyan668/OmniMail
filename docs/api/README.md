@@ -50,7 +50,7 @@ Webhook 端点按文档示例提交 Svix 签名头。除公开端点外，服务
 | [草稿与附件](drafts.md) | 8 | 服务端草稿的创建、保存、附件和幂等发送。 |
 | [iCloud 隐藏邮箱](icloud.md) | 13 | iCloud 账号、凭据、隐藏地址和按需收件箱。 |
 | [Gmail 聚合收件箱](gmail.md) | 10 | 多账号凭据、受控 IMAP 同步、聚合索引、正文与附件。 |
-| [Microsoft 邮箱](microsoft.md) | 11 | OAuth2 认证、受控 IMAP 同步、正文、附件与精确已读写入。 |
+| [Microsoft 邮箱](microsoft.md) | 11 | OAuth2 认证、IMAP 或 Graph 收信、正文、附件与精确已读写入。 |
 | [QQ 邮箱](qq-mail.md) | 13 | 授权码认证、有限 INBOX 索引、按需正文、精确已读与受控 SMTP 发信。 |
 | [NAVER 邮箱](naver-mail.md) | 10 | 应用专用密码认证、有限 INBOX 索引、按需正文、附件与精确已读。 |
 | [Yandex 邮箱](yandex-mail.md) | 10 | Mail 应用密码认证、有限 INBOX 索引、按需正文、附件与精确已读。 |

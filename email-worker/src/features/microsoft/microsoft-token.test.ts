@@ -3,10 +3,28 @@ import {
   MicrosoftTokenError,
   microsoftTokenEndpoint,
   refreshMicrosoftToken,
+  refreshMicrosoftImportToken,
   validateMicrosoftAuthority,
 } from './microsoft-token'
 
 describe('Microsoft OAuth token refresh', () => {
+  it('imports a valid Graph-only grant after IMAP scope authorization is rejected', async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = new URLSearchParams(String(init?.body))
+      if (body.get('scope')?.includes('IMAP.AccessAsUser.All')) {
+        return Response.json({ error: 'invalid_grant' }, { status: 400 })
+      }
+      expect(body.get('scope')).toBe('https://graph.microsoft.com/.default offline_access')
+      return Response.json({ access_token: 'graph-access', refresh_token: 'rotated',
+        expires_in: 3600, scope: 'https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/User.Read' })
+    })
+    await expect(refreshMicrosoftImportToken({ authority: 'common',
+      clientId: '00000000-0000-4000-8000-000000000000', refreshToken: 'valid-graph-grant', fetcher,
+    })).resolves.toMatchObject({ protocol: 'graph', accessToken: 'graph-access',
+      refreshToken: 'rotated', canMarkRead: true })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
   it('uses only the fixed Azure Global token endpoint and Outlook IMAP scope', async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = new URLSearchParams(String(init?.body))

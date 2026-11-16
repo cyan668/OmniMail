@@ -4,20 +4,20 @@
 
 **Microsoft Mail**
 
-OAuth2 认证、受控 IMAP 同步、正文、附件与精确已读写入。
+OAuth2 认证、IMAP 或 Graph 收信、正文、附件与精确已读写入。
 
-> OAuth2 authentication, controlled IMAP synchronization, bodies, attachments, and exact Seen writes.
+> OAuth2 authentication, IMAP or Graph mail retrieval, bodies, attachments, and exact read-state writes.
 
 本分类共 **11** 个端点。返回 [完整 API 索引](README.md) 或 [API 架构与安全说明](../API.md)。
 
-<!-- endpoint:GET /api/microsoft/accounts catalog:72ad0c21cd5c -->
+<!-- endpoint:GET /api/microsoft/accounts catalog:2318a88c97aa -->
 ## `GET /api/microsoft/accounts`
 
 **列出 Microsoft 账号 / List Microsoft accounts**
 
-返回当前用户的脱敏账号与同步状态，不返回令牌、密码或密文。
+返回当前用户的脱敏账号、protocol（imap 或 graph）、canMarkRead 和同步状态，不返回凭据。
 
-> Return sanitized account and synchronization state without tokens, passwords, or ciphertext.
+> Return sanitized accounts, protocol (imap or graph), canMarkRead, and sync state without credentials.
 
 | 项目 | 内容 |
 | --- | --- |
@@ -157,14 +157,14 @@ curl --request DELETE \
   --header "Authorization: Bearer om_at_..."
 ```
 
-<!-- endpoint:POST /api/microsoft/accounts/:id/verify catalog:f46d9a7007b3 -->
+<!-- endpoint:POST /api/microsoft/accounts/:id/verify catalog:982343c661b7 -->
 ## `POST /api/microsoft/accounts/{id}/verify`
 
 **验证 Microsoft 连接 / Verify a Microsoft connection**
 
-用已保存凭据验证固定 Microsoft IMAP 端点并刷新文件夹缓存。
+按已保存的 IMAP 或 Graph 连接方式验证邮箱，并刷新文件夹缓存。
 
-> Validate the fixed Microsoft IMAP endpoint with saved credentials and refresh the folder cache.
+> Validate the saved IMAP or Graph mailbox connection and refresh its folder cache.
 
 | 项目 | 内容 |
 | --- | --- |
@@ -203,14 +203,14 @@ curl --request POST \
   --header "Authorization: Bearer om_at_..."
 ```
 
-<!-- endpoint:GET /api/microsoft/accounts/:id/folders catalog:47e3ffad1333 -->
+<!-- endpoint:GET /api/microsoft/accounts/:id/folders catalog:a077bfe2d66e -->
 ## `GET /api/microsoft/accounts/{id}/folders`
 
 **列出 Microsoft 文件夹 / List Microsoft folders**
 
-读取缓存文件夹；refresh=1 时先从 IMAP LIST 安全刷新。
+读取缓存文件夹；refresh=1 时先从 Microsoft 刷新。Graph 的 INBOX 使用固定名称，其他文件夹使用 graph: 前缀的服务端 ID。
 
-> Read cached folders, optionally refreshing safely with IMAP LIST when refresh=1.
+> Read cached folders or refresh from Microsoft with refresh=1. Graph uses INBOX for the inbox and graph:-prefixed server IDs for other folders.
 
 | 项目 | 内容 |
 | --- | --- |
@@ -249,14 +249,14 @@ curl --request GET \
   --header "Authorization: Bearer om_at_..."
 ```
 
-<!-- endpoint:GET /api/microsoft/accounts/:accountId/messages/:messageId catalog:4dc4956d492e -->
+<!-- endpoint:GET /api/microsoft/accounts/:accountId/messages/:messageId catalog:0e2b16b1c988 -->
 ## `GET /api/microsoft/accounts/{accountId}/messages/{messageId}`
 
 **读取 Microsoft 正文 / Read a Microsoft message**
 
-再次校验用户、账号、文件夹与 UIDVALIDITY 后，通过 BODY.PEEK[] 按需读取 MIME 正文，并对未读邮件精确写入 \Seen。
+校验用户、账号和远端邮件身份后按需读取 MIME 正文。IMAP 使用 UIDVALIDITY/UID，Graph 使用 immutable ID；有写权限时同步已读。
 
-> Revalidate user, account, folder, and UIDVALIDITY, fetch MIME content on demand with BODY.PEEK[], and write Seen for unread messages only.
+> Validate ownership and remote identity, fetch MIME on demand using IMAP UIDVALIDITY/UID or Graph immutable IDs, and mark read only with write permission.
 
 | 项目 | 内容 |
 | --- | --- |

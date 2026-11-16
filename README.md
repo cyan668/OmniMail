@@ -192,15 +192,18 @@ Serverless Webmail：
 
 ### Microsoft 邮箱（仅已读写入）
 
-- 每个 OmniMail 用户可连接多个 Outlook.com、Hotmail、Live，或租户允许 IMAP 的
+- 每个 OmniMail 用户可连接多个 Outlook.com、Hotmail、Live，或租户允许委托邮箱访问的
   Microsoft 365 委托式账号；首期只支持 Azure Global。
 - OAuth2 是唯一认证路径：Worker 只向 Microsoft 官方 token endpoint 兑换 access token，随后
-  固定连接 `outlook.office365.com:993` 并使用 IMAP XOAUTH2。仅邮箱密码导入与 LOGIN 已停用。
+  通过 IMAP XOAUTH2 或 Microsoft Graph 收信。导入时先验证 IMAP；授权范围不匹配时尝试
+  已获同意的 Graph Mail.Read/Mail.ReadWrite。已保存账号保持原连接方式。仅邮箱密码导入已停用。
 - 工作区可以聚合 INBOX，也可选择单账号的服务器文件夹，按 1–200 条读取元数据。全部范围可把
   所有账号逐个加入同步 Queue，单账号范围可直接刷新当前文件夹；复制按钮在全部范围默认复制
-  第一个账号邮箱。正文、CID 图片与最大 5 MiB 附件仅在打开时通过 `BODY.PEEK[]` 读取，不长期保存。
+  第一个账号邮箱。正文、CID 图片与最大 5 MiB 附件仅在打开时通过 IMAP `BODY.PEEK[]`
+  或 Graph MIME 接口读取，不长期保存。
 - Cron 约每 5 分钟将到期 INBOX 同步加入 Queue；这是定时收信，不是秒级推送。打开未读邮件会在
-  正文读取成功后同步 `\Seen`；除此之外不提供发信、删除、移动、归档或星标等远端写操作。
+  正文读取成功后同步已读；Graph 仅有 Mail.Read 时保持只读，Mail.ReadWrite 时可同步已读。
+  不提供 Microsoft 账号发信、删除、移动、归档或星标等远端写操作。
 - refresh token、短期 access token与经确认留存的四字段组合 password 使用独立
   `MICROSOFT_CREDENTIALS_KEY` 进行 AES-GCM 加密；组合 password 不参与认证，API、日志与审计
   记录也不会返回敏感凭据。

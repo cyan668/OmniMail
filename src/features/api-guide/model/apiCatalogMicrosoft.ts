@@ -4,7 +4,7 @@ export const microsoftEndpoints: ApiEndpoint[] = [
   {
     method: 'GET', path: '/api/microsoft/accounts', group: 'microsoft', auth: 'authenticated',
     title: l('列出 Microsoft 账号', 'List Microsoft accounts'),
-    description: l('返回当前用户的脱敏账号与同步状态，不返回令牌、密码或密文。', 'Return sanitized account and synchronization state without tokens, passwords, or ciphertext.'),
+    description: l('返回当前用户的脱敏账号、protocol（imap 或 graph）、canMarkRead 和同步状态，不返回凭据。', 'Return sanitized accounts, protocol (imap or graph), canMarkRead, and sync state without credentials.'),
     request: 'No parameters', response: '200 · { enabled, accounts }',
   },
   {
@@ -41,7 +41,7 @@ export const microsoftEndpoints: ApiEndpoint[] = [
   {
     method: 'POST', path: '/api/microsoft/accounts/:id/verify', group: 'microsoft', auth: 'authenticated',
     title: l('验证 Microsoft 连接', 'Verify a Microsoft connection'),
-    description: l('用已保存凭据验证固定 Microsoft IMAP 端点并刷新文件夹缓存。', 'Validate the fixed Microsoft IMAP endpoint with saved credentials and refresh the folder cache.'),
+    description: l('按已保存的 IMAP 或 Graph 连接方式验证邮箱，并刷新文件夹缓存。', 'Validate the saved IMAP or Graph mailbox connection and refresh its folder cache.'),
     request: 'Path · id', response: '200 · { ok, validatedAt }',
   },
   {
@@ -53,7 +53,7 @@ export const microsoftEndpoints: ApiEndpoint[] = [
   {
     method: 'GET', path: '/api/microsoft/accounts/:id/folders', group: 'microsoft', auth: 'authenticated',
     title: l('列出 Microsoft 文件夹', 'List Microsoft folders'),
-    description: l('读取缓存文件夹；refresh=1 时先从 IMAP LIST 安全刷新。', 'Read cached folders, optionally refreshing safely with IMAP LIST when refresh=1.'),
+    description: l('读取缓存文件夹；refresh=1 时先从 Microsoft 刷新。Graph 的 INBOX 使用固定名称，其他文件夹使用 graph: 前缀的服务端 ID。', 'Read cached folders or refresh from Microsoft with refresh=1. Graph uses INBOX for the inbox and graph:-prefixed server IDs for other folders.'),
     request: 'Path · id; Query · refresh=0|1?', response: '200 · { folders }',
     examplePath: '/api/microsoft/accounts/:id/folders?refresh=1',
   },
@@ -67,7 +67,7 @@ export const microsoftEndpoints: ApiEndpoint[] = [
   {
     method: 'GET', path: '/api/microsoft/accounts/:accountId/messages/:messageId', group: 'microsoft', auth: 'authenticated',
     title: l('读取 Microsoft 正文', 'Read a Microsoft message'),
-    description: l('再次校验用户、账号、文件夹与 UIDVALIDITY 后，通过 BODY.PEEK[] 按需读取 MIME 正文，并对未读邮件精确写入 \\Seen。', 'Revalidate user, account, folder, and UIDVALIDITY, fetch MIME content on demand with BODY.PEEK[], and write Seen for unread messages only.'),
+    description: l('校验用户、账号和远端邮件身份后按需读取 MIME 正文。IMAP 使用 UIDVALIDITY/UID，Graph 使用 immutable ID；有写权限时同步已读。', 'Validate ownership and remote identity, fetch MIME on demand using IMAP UIDVALIDITY/UID or Graph immutable IDs, and mark read only with write permission.'),
     request: 'Path · accountId, messageId', response: '200 · { message }',
     examplePath: '/api/microsoft/accounts/microsoft_account_id/messages/message_id',
     notes: [l('已读写入失败不会阻断正文响应；移动、删除、归档、星标和其他 flags 写入均未开放。', 'A Seen write failure does not block the body response; move, delete, archive, star, and other flag writes are not available.')],
