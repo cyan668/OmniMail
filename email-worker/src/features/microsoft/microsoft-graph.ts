@@ -72,7 +72,8 @@ export class MicrosoftGraphClient {
 
   async request(path: string, init: RequestInit = {}): Promise<Response> {
     const url = graphUrl(path)
-    const send = () => this.fetcher(url, { ...init, redirect: 'manual',
+    const fetcher = this.fetcher
+    const send = () => fetcher(url, { ...init, redirect: 'manual',
       headers: { Accept: 'application/json', ...init.headers,
         Authorization: `Bearer ${this.token}`, Prefer: 'IdType="ImmutableId"' },
       signal: AbortSignal.timeout(30_000) })

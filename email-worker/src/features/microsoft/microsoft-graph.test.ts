@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { graphUrl, MicrosoftGraphClient } from './microsoft-graph'
 
 describe('Microsoft Graph mailbox adapter', () => {
+  it('calls a native fetch function without binding the client as its receiver', async () => {
+    const fetcher = function (this: unknown): Promise<Response> {
+      expect(this).toBeUndefined()
+      return Promise.resolve(Response.json({ id: 'inbox', totalItemCount: 1 }))
+    }
+    await expect(new MicrosoftGraphClient('access', false, fetcher).open()).resolves.toBeUndefined()
+  })
   it('follows opaque pagination and requests immutable IDs on every page', async () => {
     const next = 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skiptoken=opaque%2Bvalue'
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
