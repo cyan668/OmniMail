@@ -48,6 +48,7 @@ export function microsoftResponseError(
     return microsoftPrivateJson({
       error: messages[error.code] || 'Microsoft token 刷新失败。',
       code: error.code,
+      ...(error instanceof MicrosoftGraphError ? { remoteStatus: error.status, providerCode: error.providerCode } : {}),
     }, error.status)
   }
   if (error instanceof ImapConnectionError) {

@@ -15,7 +15,7 @@ type GraphMessage = {
 
 export class MicrosoftGraphError extends Error {
   constructor(readonly code: string, readonly status: number, readonly retryable = false,
-    readonly retryAfter = 0) {
+    readonly retryAfter = 0, readonly providerCode = '') {
     super(`Microsoft Graph request failed (${code}).`)
   }
 }
@@ -72,7 +72,7 @@ export class MicrosoftGraphClient {
 
   async request(path: string, init: RequestInit = {}): Promise<Response> {
     const url = graphUrl(path)
-    const send = () => this.fetcher(url, { ...init, redirect: 'error',
+    const send = () => this.fetcher(url, { ...init, redirect: 'manual',
       headers: { Accept: 'application/json', ...init.headers,
         Authorization: `Bearer ${this.token}`, Prefer: 'IdType="ImmutableId"' },
       signal: AbortSignal.timeout(30_000) })
@@ -86,10 +86,13 @@ export class MicrosoftGraphClient {
       }
     } catch (error) {
       if (error instanceof MicrosoftTokenError || (error instanceof Error && 'code' in error)) throw error
-      throw new MicrosoftGraphError('graph_unavailable', 503, true)
+      throw new MicrosoftGraphError('graph_unavailable', 503, true, 0,
+        error instanceof Error ? error.name : 'FetchError')
     }
     if (!response.ok) {
-      await response.body?.cancel()
+      const body = await response.json<{ error?: { code?: string } }>().catch(() => ({} as { error?: { code?: string } }))
+      const providerCode = typeof body.error?.code === 'string' && /^[a-z0-9_.-]{1,80}$/i.test(body.error.code)
+        ? body.error.code : ''
       const code = response.status === 401 ? 'graph_auth_rejected'
         : response.status === 403 ? 'graph_access_rejected'
           : response.status === 404 ? 'remote_message_not_found'
@@ -97,7 +100,7 @@ export class MicrosoftGraphClient {
       const retryAfter = Number(response.headers.get('Retry-After'))
       throw new MicrosoftGraphError(code, response.status,
         response.status === 429 || response.status >= 500,
-        Number.isFinite(retryAfter) ? Math.max(0, retryAfter) : 0)
+        Number.isFinite(retryAfter) ? Math.max(0, retryAfter) : 0, providerCode)
     }
     return response
   }

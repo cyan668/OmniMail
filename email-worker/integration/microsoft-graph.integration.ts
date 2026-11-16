@@ -5,7 +5,7 @@ import type { SessionUser } from '../src/app/types'
 import { importMicrosoftAccounts, listMicrosoftAccounts, verifyMicrosoftAccount } from '../src/features/microsoft/microsoft-account-api'
 import { getMicrosoftAttachment, getMicrosoftMessage, listMicrosoftMessages } from '../src/features/microsoft/microsoft-message-api'
 import { syncMicrosoftAccount, messageStatement } from '../src/features/microsoft/microsoft-sync'
-import { graphMetadata } from '../src/features/microsoft/microsoft-graph'
+import { graphMetadata, MicrosoftGraphClient } from '../src/features/microsoft/microsoft-graph'
 import { microsoftAccountForSync } from '../src/features/microsoft/microsoft-store'
 import { microsoftAccessToken } from '../src/features/microsoft/microsoft-token-manager'
 
@@ -30,6 +30,14 @@ beforeAll(async () => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Microsoft Graph with real D1 and existing IMAP rows', () => {
+  it('constructs outbound requests accepted by the Workers runtime', async () => {
+    const client = new MicrosoftGraphClient('test', false, async (input, init) => {
+      const request = new Request(input, init)
+      expect(request.url).toContain('/me/mailFolders/inbox')
+      return Response.json({ id: 'inbox', totalItemCount: 1 })
+    })
+    await expect(client.open()).resolves.toBeUndefined()
+  })
   it('preserves legacy identity, triggers, and foreign keys when migrating', async () => {
     expect(await env.DB.prepare("SELECT uid_validity,imap_uid,subject,graph_message_id FROM microsoft_imap_messages WHERE id='legacy-message'").first())
       .toEqual({ uid_validity: 42, imap_uid: 7, subject: 'Keep me', graph_message_id: '' })
