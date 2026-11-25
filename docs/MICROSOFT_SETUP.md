@@ -3,7 +3,7 @@
 > 新部署推荐使用统一 `MAIL_CREDENTIALS_KEY`；旧 `MICROSOFT_CREDENTIALS_KEY` 继续兼容。升级时先保留旧值，按[迁移指南](MAIL_CREDENTIALS.md)由主管理员主动迁移。
 
 OmniMail 支持 IMAP OAuth2 和 Microsoft Graph 两种收信方式，使用用户提供的 refresh token
-与 Client ID。导入时先验证 IMAP；IMAP 授权范围不匹配时尝试 Graph 的已授权权限，并保存
+与 Client ID。导入时先验证 IMAP；IMAP 授权范围不匹配或 XOAUTH2 登录被拒绝时尝试 Graph 的已授权权限，并保存
 实际通过邮箱验证的连接方式。现有 IMAP 账号继续使用原连接方式。
 
 首期支持 Azure Global 上的 Outlook.com、Hotmail、Live，以及租户管理员允许委托邮箱访问的
@@ -40,7 +40,7 @@ MICROSOFT_MAIL_ENABLED=true
 
 签发 refresh token 时，IMAP 账号需要委托式 Outlook IMAP 权限
 `https://outlook.office.com/IMAP.AccessAsUser.All` 和 `offline_access`。
-Graph 账号需要 `Mail.Read` 或 `Mail.ReadWrite`、`User.Read`（核对邮箱身份）与 `offline_access`。
+Graph 账号需要 `Mail.Read` 或 `Mail.ReadWrite` 与 `offline_access`；`User.Read` 是可选的资料读取权限。
 只有 `Mail.Read` 时仍可收信、打开正文和附件，但不会修改远端已读状态。OmniMail 不内置或借用
 任何第三方 Client ID，也不负责绕过租户同意、条件访问或管理员策略。授权与 refresh token 行为见
 [Microsoft IMAP OAuth 文档](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth)和
@@ -55,7 +55,9 @@ scope=https://outlook.office.com/IMAP.AccessAsUser.All offline_access
 
 Graph 账号使用同一 token endpoint，scope 为
 `https://graph.microsoft.com/.default offline_access`，只取得应用已获同意的 Graph 权限。
-填写邮箱须与 Graph `/me` 返回的主邮箱或 userPrincipalName 一致。
+有 `User.Read` 等资料读取权限时，填写邮箱须与 Graph `/me` 返回的主邮箱或 userPrincipalName 一致。
+没有资料读取权限时，以 INBOX 访问验证收信能力，填写邮箱仅作为用户提供的本地标签，地址匹配未经核验；
+所有远端请求仍固定访问令牌对应的 `/me` 邮箱，不使用填写地址选择其他邮箱。
 
 成功兑换后才会验证 Microsoft 邮箱。若 Microsoft 返回轮换后的 refresh token，OmniMail 会在
 账号级刷新租约保护下原子替换旧密文。XOAUTH2 失败时只允许强制刷新并重试一次，不会改用密码。
@@ -88,7 +90,7 @@ email--------refresh_token----client_id
 ## 4. 验证与收信
 
 连接时 Worker 会先完成真实 token 兑换。IMAP 验证 XOAUTH2、`LIST` 和 INBOX `EXAMINE`；
-Graph 核对账号身份、INBOX 访问及文件夹列表。验证成功后才保存账号。
+Graph 验证 INBOX 访问及文件夹列表，并在具备资料读取权限时核对账号身份。验证成功后才保存账号。
 
 连接成功后：
 

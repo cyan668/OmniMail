@@ -38,7 +38,7 @@ refresh token + Client ID
 
 - 分字段录入：账号名称、邮箱地址、refresh token、Client ID、authority 和可选组合密码。
 - 批量导入：浏览器解析逐行文本，先安全预览，再逐账号验证并导入。
-- 新账号先尝试 IMAP scope；授权范围不匹配时验证 Graph。IMAP 必须通过 XOAUTH2、LIST 和 EXAMINE；Graph 必须通过身份核对、INBOX 访问和文件夹列表。
+- 新账号先尝试 IMAP；授权范围不匹配或 XOAUTH2 登录被拒绝时验证 Graph。IMAP 必须通过 XOAUTH2、LIST 和 EXAMINE；Graph 必须通过 INBOX 访问和文件夹列表，并在具备资料读取权限时核对身份。普通连接超时不会触发协议切换，已保存账号保持原协议。
 - 重复邮箱不会覆盖已有账号；每一项独立返回成功、重复或稳定错误。
 - 组合密码存在时，安全预览页必须勾选允许服务端加密保存，之后才会上传。
 
@@ -164,7 +164,7 @@ grant_type=refresh_token
 scope=https://outlook.office.com/IMAP.AccessAsUser.All offline_access
 ```
 
-Graph 刷新 scope 固定为 `https://graph.microsoft.com/.default offline_access`，要求已同意 Mail.Read/Mail.ReadWrite；身份核对需要 User.Read。已保存账号刷新或更换凭据时保持原协议。
+Graph 刷新 scope 固定为 `https://graph.microsoft.com/.default offline_access`，要求已同意 Mail.Read/Mail.ReadWrite。User.Read 可选：有资料读取权限时核对身份，没有时只验证邮箱访问，用户填写地址作为本地标签，不宣称地址已核实。远端路径始终固定为 /me，不以标签决定访问的邮箱。已保存账号刷新或更换凭据时保持原协议。
 
 IMAP 主机和端口固定为 `outlook.office365.com:993`，强制 TLS。导入数据和 API 请求都不能指定
 OAuth URL、IMAP 主机、端口、TLS 策略、代理或原始 IMAP 命令。

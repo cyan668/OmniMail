@@ -195,7 +195,7 @@ Serverless Webmail：
 - 每个 OmniMail 用户可连接多个 Outlook.com、Hotmail、Live，或租户允许委托邮箱访问的
   Microsoft 365 委托式账号；首期只支持 Azure Global。
 - OAuth2 是唯一认证路径：Worker 只向 Microsoft 官方 token endpoint 兑换 access token，随后
-  通过 IMAP XOAUTH2 或 Microsoft Graph 收信。导入时先验证 IMAP；授权范围不匹配时尝试
+  通过 IMAP XOAUTH2 或 Microsoft Graph 收信。导入时先验证 IMAP；授权范围不匹配或登录被拒绝时尝试
   已获同意的 Graph Mail.Read/Mail.ReadWrite。已保存账号保持原连接方式。仅邮箱密码导入已停用。
 - 工作区可以聚合 INBOX，也可选择单账号的服务器文件夹，按 1–200 条读取元数据。全部范围可把
   所有账号逐个加入同步 Queue，单账号范围可直接刷新当前文件夹；复制按钮在全部范围默认复制

@@ -1,6 +1,7 @@
 import type { Env, MicrosoftSyncJob, SessionUser } from '../../app/types'
 import { writeAudit } from '../../shared/audit/audit'
 import { sha256 } from '../auth/session/auth'
+import { ImapConnectionError } from '../../platform/imap/imap-errors'
 import { microsoftMailEnabled } from './microsoft-credentials'
 import { microsoftImportAccount, MicrosoftInputError } from './microsoft-fields'
 import { MicrosoftGraphClient } from './microsoft-graph'
@@ -76,7 +77,7 @@ export async function claimMicrosoftValidationAttempt(
   }
 }
 
-async function validateImport(input: ValidMicrosoftImport, protocol?: MicrosoftProtocol): Promise<{
+export async function validateMicrosoftImport(input: ValidMicrosoftImport, protocol?: MicrosoftProtocol): Promise<{
   refreshToken: string
   accessToken: string
   accessTokenExpiresAt: number | null
@@ -89,20 +90,26 @@ async function validateImport(input: ValidMicrosoftImport, protocol?: MicrosoftP
   let accessTokenExpiresAt: number | null = null
   let selectedProtocol = protocol || 'imap'
   let canMarkRead = true
-  if (input.authMode === 'oauth2') {
-    const token = await refreshMicrosoftImportToken({
-      authority: input.authority,
-      clientId: input.clientId,
-      refreshToken,
-      protocol,
-    })
+  let canReadProfile = false
+  const rememberToken = (token: Awaited<ReturnType<typeof refreshMicrosoftImportToken>>) => {
     refreshToken = token.refreshToken
     accessToken = token.accessToken
     accessTokenExpiresAt = Math.floor(Date.now() / 1000) + token.expiresIn
     selectedProtocol = token.protocol
     canMarkRead = token.canMarkRead
+    const scopes = token.scope.toLowerCase().split(/\s+/)
+    canReadProfile = ['user.read', 'user.readwrite', 'user.read.all', 'user.readwrite.all']
+      .some(scope => scopes.includes(scope) || scopes.includes(`https://graph.microsoft.com/${scope}`))
   }
-  const client = await microsoftClient(
+  if (input.authMode === 'oauth2') {
+    rememberToken(await refreshMicrosoftImportToken({
+      authority: input.authority,
+      clientId: input.clientId,
+      refreshToken,
+      protocol,
+    }))
+  }
+  let client = await microsoftClient(
     input.email,
     input.authMode,
     input.authMode === 'oauth2' ? accessToken : input.password || '',
@@ -110,8 +117,23 @@ async function validateImport(input: ValidMicrosoftImport, protocol?: MicrosoftP
     canMarkRead,
   )
   try {
-    await client.open()
-    if (client.protocol === 'graph') await client.validateIdentity(input.email)
+    try {
+      await client.open()
+    } catch (error) {
+      // Some grants mint an IMAP token but reject XOAUTH2 while Graph Mail.Read works.
+      // Negotiate only a new connection; saved accounts never change their protocol here.
+      if (protocol || selectedProtocol !== 'imap' || input.authMode !== 'oauth2'
+        || !(error instanceof ImapConnectionError) || ![400, 401].includes(error.status)) throw error
+      await client.close()
+      rememberToken(await refreshMicrosoftImportToken({
+        authority: input.authority, clientId: input.clientId, refreshToken, protocol: 'graph',
+      }))
+      client = await microsoftClient(input.email, input.authMode, accessToken, selectedProtocol, canMarkRead)
+      await client.open()
+    }
+    // Mail.Read authorizes the mailbox, not /me profile access. Without User.Read,
+    // the supplied email remains a local label; all remote requests are fixed to /me.
+    if (client.protocol === 'graph' && canReadProfile) await client.validateIdentity(input.email)
     const folders = await client.listFolders()
     const inbox = folders.find(({ path }) => path.toUpperCase() === 'INBOX')
     if (!inbox) throw new MicrosoftStoreError(502, 'inbox_unavailable', 'Microsoft INBOX 不可用。')
@@ -181,7 +203,7 @@ export async function importMicrosoftAccounts(
         }
         seen.add(input.email)
         await claimMicrosoftValidationAttempt(env, user.id, ip)
-        const validated = await validateImport(input)
+        const validated = await validateMicrosoftImport(input)
         const now = Math.floor(Date.now() / 1000)
         const account: MicrosoftAccount = {
           id: `microsoft_${crypto.randomUUID().replaceAll('-', '')}`,
@@ -270,7 +292,7 @@ export async function updateMicrosoftCredential(
       authMode,
     })
     await claimMicrosoftValidationAttempt(env, user.id, ip)
-    const validated = await validateImport(input, account.protocol || 'imap')
+    const validated = await validateMicrosoftImport(input, account.protocol || 'imap')
     const now = Math.floor(Date.now() / 1000)
     if (authMode === 'oauth2') {
       await store.replaceOAuthCredential({

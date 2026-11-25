@@ -30,6 +30,30 @@ beforeAll(async () => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Microsoft Graph with real D1 and existing IMAP rows', () => {
+  it('connects a Mail.Read-only mailbox without requesting the user profile', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.startsWith('https://login.microsoftonline.com/')) {
+        const form = new URLSearchParams(String(init?.body))
+        if (form.get('scope')?.includes('IMAP')) return Response.json({ error: 'invalid_grant' }, { status: 400 })
+        return Response.json({ access_token: 'read-access', refresh_token: 'read-rotated', expires_in: 3600,
+          scope: 'https://graph.microsoft.com/Mail.Read' })
+      }
+      if (url.includes('/me/?')) return Response.json({ error: { code: 'InvalidAuthenticationToken' } }, { status: 401 })
+      if (url.includes('/inbox?')) return Response.json({ id: 'inbox', displayName: 'Inbox', totalItemCount: 0 })
+      return Response.json({ value: [{ id: 'inbox', displayName: 'Inbox', childFolderCount: 0 }] })
+    }))
+    const runtime = { ...env, MAIL_QUEUE: { send: vi.fn(async () => undefined) } as unknown as Queue }
+    const response = await importMicrosoftAccounts(runtime, user, new Request('https://mail.example.com/api/microsoft/accounts/import', {
+      method: 'POST', body: JSON.stringify({ accounts: [{ email: 'read-only@example.com', authMode: 'oauth2',
+        refreshToken: 'read-grant', clientId: '00000000-0000-4000-8000-000000000000' }] }),
+    }), '127.0.0.1')
+    expect(response.status).toBe(201)
+    expect(await response.json()).toMatchObject({ results: [{ status: 'accepted', account: { protocol: 'graph', canMarkRead: false } }] })
+    expect(calls.some(url => url.includes('/me/?'))).toBe(false)
+  })
   it('constructs outbound requests accepted by the Workers runtime', async () => {
     const client = new MicrosoftGraphClient('test', false, async (input, init) => {
       const request = new Request(input, init)
